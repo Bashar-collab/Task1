@@ -18,6 +18,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Optional;
 //import java.util.logging.Logger;
@@ -79,23 +81,37 @@ public class UserService {
     }
     // Handle login
 
-    public UserDto login(String email, String password)
-    {
-        Optional<User> userOpt = userRepository.findByEmail(email);
+    public ResponseEntity<?> login(String email, String password) {
+        try {
+            Optional<User> userOpt = userRepository.findByEmail(email);
 
-        if(userOpt.isPresent()) {
-            User user = userOpt.get();
+            if (userOpt.isPresent()) {
+                User user = userOpt.get();
 
-            // Verify Password
-            if (passwordEncoder.matches(password, user.getPassword())) {
-                return convertToDto(user); // Convert User to UserDto
+                // Verify Password
+                if (passwordEncoder.matches(password, user.getPassword())) {
+                    UserDto userDto = convertToDto(user); // Convert User to UserDto
+                    // Return the user details along with a success message
+                    logger.info("Login Success!");
+                    return ResponseEntity.ok().body(new MessageResponse("Login Successful"));
+                } else {
+                    // Return a 401 status with an appropriate error message
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                            .body(new MessageResponse("Invalid password"));
+                }
             } else {
-                throw new IllegalArgumentException("Invalid password");
+                // Return a 404 status with an appropriate error message
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(new MessageResponse("User not found with email!"));
             }
+        } catch (Exception e) {
+            // Handle any other exceptions that might occur
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new MessageResponse("An unexpected error occurred."));
         }
-        else
-            throw new UsernameNotFoundException("User not found with email: " + email);
     }
+
+
 
     // Retrieve all users
     public List<UserDto> getAllUsers()
@@ -116,42 +132,71 @@ public class UserService {
     }
 
     // Method to find a user by username
-    public List<User> findByUsername(String username) {
-//        List<User> users = userRepository.findByUsernameContaining(username);
-//        if (users.isEmpty())
-//        {
-//            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-//                    .body("No users found with username containing: " + username);
-//        }
-        return userRepository.findByUsernameContaining(username);
+    public ResponseEntity<?> findByUsername(String username) {
+        logger.info("Fetching user with username: " + username);
+        List<User> users = userRepository.findByUsernameContaining(username);
+        if (!username.isEmpty())
+        {
+            logger.info("Username: " + username + " is fetched");
+            return ResponseEntity.ok(users);
+        }
+        else
+        {
+            logger.warn("User with username: " + username + " not found.");
+            return ResponseEntity.badRequest().body(new MessageResponse("No user is found"));
+        }
     }
 
-    public List<User> findByRegisterDate(LocalDate registerDate)
+    // Endpoint to find a user by register date
+    public ResponseEntity<?> findByRegisterDate(String registerDate)
     {
-        // Convert LocalDate to the start of day
-//        LocalDateTime registerDateT = registerDate.atStartOfDay();
-//        List<User> users = userRepository.findByRegisterDate(registerDate);
-//        if (users.isEmpty())
-//        {
-//            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-//                    .body("No users found with register date: " + registerDate);
-//        }
-        return userRepository.findByRegisterDate(registerDate);
+        try {
+            logger.info("Fetching user with registration date: " + registerDate);
+
+            LocalDate registerDateT = LocalDate.parse(registerDate);
+            List<User> users = userRepository.findByRegisterDate(registerDateT);
+
+            if (!users.isEmpty()) {
+                logger.info("User with registration date: " + registerDateT + " is fetched");
+                return ResponseEntity.ok(users);
+            } else {
+                logger.warn("User with registration date: " + registerDateT + " not found.");
+                return ResponseEntity.badRequest().body(new MessageResponse("No user is found"));
+            }
+        } catch (Exception e) {
+            logger.error("Error parsing date or fetching users", e);
+            return ResponseEntity.badRequest().body(new MessageResponse("Invalid date format or an error occurred"));
+        }
     }
     // Find users registered between two dates
-    public List<User> getUsersRegisteredBetween(LocalDate startDate, LocalDate endDate)
-    {
-        logger.info("Retrieving users registered between " + startDate + " and " + endDate);
-        return userRepository.findAllByRegisterDateBetween(startDate, endDate);
-//        if (users.isEmpty())
-//        {
-//            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-//                    .body("No users found registered between " + startDate + " and " + endDate);
-//        }
-//        return ResponseEntity.ok(users);
+    public ResponseEntity<?> getUsersRegisteredBetween(String start, String end) {
+        try {
+            logger.info("Retrieving users between the two dates below:");
+            logger.info("Start Date: " + start);
+            logger.info("End Date: " + end);
+
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+            LocalDate startDate = LocalDate.parse(start, formatter);
+            LocalDate endDate = LocalDate.parse(end, formatter);
+
+            List<User> users = userRepository.findAllByRegisterDateBetween(startDate, endDate);
+            if (!users.isEmpty()) {
+                return ResponseEntity.ok(users);
+            } else {
+                return ResponseEntity.badRequest().body(new MessageResponse("No users found between the given dates"));
+            }
+        } catch (DateTimeParseException e) {
+            logger.error("Error parsing dates", e);
+            return ResponseEntity.badRequest().body(new MessageResponse("Invalid date format. Please use yyyy-MM-dd"));
+        } catch (Exception e) {
+            logger.error("An unexpected error occurred while retrieving users", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new MessageResponse("An unexpected error occurred"));
+        }
     }
 
-//    public List<User> g
+
+    //    public List<User> g
     // Delete one row by id
     public void deleteUserById(Long id)
     {
@@ -163,18 +208,36 @@ public class UserService {
     // Delete many rows based on register date
 //    deleteUsers
     @Transactional
-    public void deleteUsersByRegisterDate(LocalDate startDate, LocalDate endDate)
+    public ResponseEntity<?> deleteUsersByRegisterDate(String start, String end)
     {
-        logger.info("Deleting users registered between " + startDate + " and " + endDate);
-//        LocalDateTime startDateT = startDate.atStartOfDay();
-//        LocalDateTime endDateT = endDate.atStartOfDay();
-        userRepository.deleteAllByRegisterDateBetween(startDate, endDate);
-        logger.info("Users registered between " + startDate + " and " + endDate + " have been deleted");
+        try {
+            logger.info("Deleting users between two dates below:");
+            logger.info("Start Date: " + start);
+            logger.info("End Date: " + end);
+
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+            LocalDate startDate = LocalDate.parse(start, formatter);
+            LocalDate endDate = LocalDate.parse(end, formatter);
+
+            // Delete users within the specified date range
+            userRepository.deleteAllByRegisterDateBetween(startDate, endDate);
+
+            logger.info("Users registered between " + startDate + " and " + endDate + " have been deleted");
+            return ResponseEntity.ok(new MessageResponse("Users successfully deleted"));
+        } catch (DateTimeParseException e) {
+            logger.error("Error parsing dates", e);
+            return ResponseEntity.badRequest().body(new MessageResponse("Invalid date format. Please use yyyy-MM-dd"));
+        } catch (Exception e) {
+            logger.error("An unexpected error occurred while deleting users", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new MessageResponse("An unexpected error occurred"));
+        }
     }
 
     // Update one row by id
     public ResponseEntity<?> updateUserById(Long id, User newUserDetails)
     {
+        logger.info("Updating user with id " + id + " details!" );
         // Check if the email already exists in the database
         Optional<User> existingUserWithEmail = userRepository.findByEmail(newUserDetails.getEmail());
         if (existingUserWithEmail.isPresent() && !existingUserWithEmail.get().getId().equals(id)) {
@@ -182,8 +245,6 @@ public class UserService {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(new MessageResponse("Error: Email is already in use!"));
         }
-
-        logger.info("Updating user with id: " + id);
         ResponseEntity<?> validationResponse = DataValidation.validateUpdatedUser(newUserDetails);
 
         if (validationResponse != null) {
